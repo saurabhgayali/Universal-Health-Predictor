@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Health Predictor</title>
+    <!-- Core Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- PDF Generation with Unicode Support -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gray: { 150: '#ececec', 750: '#333333', 850: '#1a1a1a', 950: '#0f0f0f' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .symptom-card { transition: all 0.1s ease; }
+        .selected { background-color: #333333 !important; color: #ffffff !important; border-color: #000000 !important; }
+        .dark .selected { background-color: #f5f5f5 !important; color: #000000 !important; border-color: #ffffff !important; }
+        #symptomList::-webkit-scrollbar { width: 4px; }
+        #symptomList::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        
+        #pdfCapture {
+            position: absolute;
+            left: -9999px;
+            top: 0;
+            width: 750px;
+            background: white;
+            color: black;
+            padding: 50px;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 min-h-screen transition-colors duration-200 flex flex-col">
+
+    <!-- Navbar -->
+    <nav class="border-b border-gray-200 dark:border-gray-800 p-4">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold tracking-tighter uppercase">Universal Health Predictor</h1>
+            <div class="flex items-center gap-4">
+                <button id="toggleDark" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
+                    <svg id="sunIcon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/></svg>
+                    <svg id="moonIcon" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+                </button>
+                <button id="showAbout" class="text-xs font-bold uppercase border border-gray-900 dark:border-gray-100 px-3 py-1 hover:bg-gray-900 hover:text-white dark:hover:bg-white dark:hover:text-black transition">About App</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow max-w-6xl mx-auto py-10 px-4 w-full">
+        <!-- Load Section -->
+        <div id="uploadSection" class="space-y-8">
+            <div class="bg-gray-50 dark:bg-gray-900 p-8 rounded-xl border border-gray-200 dark:border-gray-800 text-center">
+                <h2 class="text-2xl font-bold mb-4">Load Data Source</h2>
+                <div class="flex flex-col md:flex-row gap-4 justify-center items-center">
+                    <label class="cursor-pointer bg-gray-750 dark:bg-white text-white dark:text-black px-6 py-2 font-bold rounded hover:opacity-80 transition">
+                        Browse File (CSV/XLSX)
+                        <input type="file" id="dataFile" accept=".csv, .xlsx, .xls" class="hidden">
+                    </label>
+                    <span class="text-gray-400 font-bold">OR</span>
+                    <div class="flex gap-2">
+                        <input type="text" id="urlInput" placeholder="Paste File URL..." class="border border-gray-300 dark:border-gray-700 bg-transparent px-4 py-2 rounded outline-none w-64 text-sm">
+                        <button id="urlBtn" class="bg-gray-200 dark:bg-gray-800 px-4 py-2 font-bold rounded hover:bg-gray-300 transition">Fetch</button>
+                    </div>
+                </div>
+                <div id="loader" class="hidden mt-6 text-sm italic animate-pulse">Processing dataset...</div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="p-6 border border-gray-100 dark:border-gray-800 rounded-lg">
+                    <h3 class="font-bold mb-2 uppercase text-xs text-gray-400 tracking-widest">Sample Data URLs</h3>
+                    <ul class="text-[10px] space-y-3 font-mono break-all text-blue-600 dark:text-blue-400">
+                        <li class="p-2 bg-gray-50 dark:bg-gray-900 rounded select-all cursor-pointer hover:bg-gray-100">https://raw.githubusercontent.com/itssaurabh/datasets/main/disease_symptoms.csv</li>
+                        <li class="p-2 bg-gray-50 dark:bg-gray-900 rounded select-all cursor-pointer hover:bg-gray-100">https://data.mendeley.com/public-files/datasets/rjgjh8hgrt/files/76a0863f-e65c-49a9-be8b-69ebeff528e7/file_downloaded</li>
+                    </ul>
+                </div>
+                <div class="p-6 border border-gray-100 dark:border-gray-800 rounded-lg">
+                    <h3 class="font-bold mb-2 uppercase text-xs text-gray-400 tracking-widest">Instructions</h3>
+                    <p class="text-xs leading-relaxed text-gray-500">
+                        1. <strong>Download</strong> a compatible dataset and use <strong>Browse</strong> for local privacy.<br>
+                        2. <strong>Paste URL</strong> directly to fetch if the source supports CORS.<br>
+                        3. Ensure the first column is the <strong>Condition</strong> and subsequent columns are binary (1/0) indicators.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Interface -->
+        <div id="mainApp" class="hidden space-y-6">
+            <div class="flex flex-col lg:flex-row gap-6">
+                <div class="flex-1 space-y-4">
+                    <div class="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="font-bold uppercase tracking-widest text-sm text-gray-500">1. Select Symptoms / Indicators</h2>
+                            <button id="downloadChecklist" class="text-[10px] font-bold border border-gray-300 dark:border-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">Download Checklist PDF</button>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                            <input type="text" id="patientName" placeholder="Patient Name (Unicode Supported)" class="p-2 bg-gray-50 dark:bg-gray-800 border-none rounded outline-none text-sm">
+                            <input type="text" id="symptomSearch" placeholder="Search indicator names..." class="p-2 bg-gray-50 dark:bg-gray-800 border-none rounded outline-none text-sm">
+                        </div>
+                        <div id="symptomList" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[400px] overflow-y-auto pr-2"></div>
+                    </div>
+                </div>
+
+                <div class="w-full lg:w-80 space-y-4">
+                    <div class="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 sticky top-4">
+                        <h2 class="font-bold uppercase tracking-widest text-xs text-gray-400 mb-4">Operations</h2>
+                        <button id="predictBtn" disabled class="w-full bg-gray-750 dark:bg-white text-white dark:text-black font-bold py-3 rounded mb-2 opacity-50 transition-all hover:opacity-90">Analyze Now</button>
+                        <button id="clearSelection" class="w-full border border-gray-300 dark:border-gray-700 text-xs py-2 rounded mb-2 hover:bg-gray-50 dark:hover:bg-gray-800 transition">Clear Selection</button>
+                        <button id="resetAppBtn" class="w-full text-gray-400 text-[10px] uppercase font-bold py-2 hover:text-red-500 transition">Reset All Data</button>
+                        <div id="selectedCount" class="mt-4 text-[10px] font-bold text-gray-400 uppercase text-center">0 items selected</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results -->
+            <div id="results" class="hidden">
+                <div class="bg-white dark:bg-gray-900 p-8 rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-xl font-bold uppercase tracking-tighter">Probabilistic Matches</h2>
+                        <button id="downloadPDF" class="bg-gray-100 dark:bg-gray-800 px-4 py-2 rounded text-xs font-bold hover:bg-gray-200 transition">
+                            Download Results PDF
+                        </button>
+                    </div>
+                    <div id="resultList" class="space-y-4"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-gray-100 dark:border-gray-900 p-6 mt-10">
+        <div class="max-w-6xl mx-auto space-y-4">
+            <p id="uiDisclaimer" class="text-[10px] text-gray-400 text-center italic leading-relaxed max-w-4xl mx-auto"></p>
+            <p class="text-[9px] text-gray-300 dark:text-gray-700 text-center uppercase tracking-widest">
+                Developed by <a href="mailto:saurabh.gayali@gmail.com" class="underline hover:text-blue-600 dark:hover:text-blue-400 transition">Saurabh Gayali</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- PDF Capture Area -->
+    <div id="pdfCapture">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px;">
+            <div>
+                <h1 style="font-size: 28px; font-weight: bold; margin: 0; text-transform: uppercase; letter-spacing: -1px;">Health Analysis Report</h1>
+                <p style="font-size: 12px; color: #666; margin: 5px 0 0 0;">Universal Health Predictor | Data-Driven Probabilistic Insights</p>
+            </div>
+            <div style="text-align: right; font-size: 11px;">
+                <strong>Date:</strong> <span id="pdfDate"></span>
+            </div>
+        </div>
+        
+        <div style="margin-bottom: 25px; padding: 15px; background: #f9f9f9; border-radius: 5px;">
+            <strong style="font-size: 13px;">Patient:</strong> <span id="pdfPatient" style="margin-left: 10px;"></span>
+        </div>
+
+        <div style="margin-bottom: 30px;">
+            <h3 style="font-size: 14px; text-transform: uppercase; margin-bottom: 10px; color: #444; border-bottom: 1px solid #eee; padding-bottom: 5px;">Input Parameters</h3>
+            <p id="pdfSyms" style="font-size: 11px; color: #333; line-height: 1.5;"></p>
+        </div>
+
+        <div id="pdfTableWrapper"></div>
+
+        <div style="margin-top: 50px; border-top: 1px solid #eee; padding-top: 20px;">
+            <p id="pdfDisclaimer" style="font-size: 9px; color: #888; font-style: italic; line-height: 1.4; margin-bottom: 15px;"></p>
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #aaa; text-transform: uppercase; letter-spacing: 1px;">
+                <span>© 2024 MIT License</span>
+                <span>Developed by Saurabh Gayali</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- About Modal -->
+    <div id="aboutModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white dark:bg-gray-900 max-w-3xl w-full p-8 rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold uppercase italic tracking-tighter">Universal Health Predictor</h2>
+                <button id="closeAbout" class="text-3xl font-light hover:text-red-500">&times;</button>
+            </div>
+            <div class="space-y-6 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                <section>
+                    <h3 class="font-bold text-black dark:text-white uppercase text-xs mb-2">About This App</h3>
+                    <p>Universal Health Predictor is a client-side statistical decision-support tool. It enables users to perform transparent, deterministic condition matching using their own structured datasets. The application does not contain built-in medical knowledge and does not use artificial intelligence or machine learning.</p>
+                </section>
+
+                <section>
+                    <h3 class="font-bold text-black dark:text-white uppercase text-xs mb-2">Algorithm & Model</h3>
+                    <p>This app implements a frequency-based statistical weighting model. For each selected indicator, the system calculates its frequency within each condition, then computes a normalized mean score. All computations are deterministic and fully explainable. No predictive, AI, or ML methods are used.</p>
+                </section>
+
+                <section>
+                    <h3 class="font-bold text-black dark:text-white uppercase text-xs mb-2">Regulatory & Professional Statement</h3>
+                    <p>This application is intended for use with hospital-supplied, high-quality datasets. It is strictly a statistical pattern-matching tool and does <strong>not</strong> provide diagnostic, predictive, or clinical decision-making capabilities. All results are based solely on user-provided data and statistical calculations.</p>
+                </section>
+
+                <section>
+                    <h3 class="font-bold text-black dark:text-white uppercase text-xs mb-2">Data Structure Example</h3>
+                    <div class="overflow-x-auto border border-gray-200 dark:border-gray-800 rounded">
+                        <table class="w-full text-[10px] text-left">
+                            <thead class="bg-gray-50 dark:bg-gray-800">
+                                <tr><th class="p-2 border-r dark:border-gray-700">Condition</th><th class="p-2">Fever</th><th class="p-2">Cough</th><th class="p-2">Unicode_नाम</th><th class="p-2">...</th></tr>
+                            </thead>
+                            <tbody class="divide-y dark:divide-gray-800">
+                                <tr><td class="p-2 border-r dark:border-gray-700 font-bold">A (फ्लू)</td><td class="p-2">1</td><td class="p-2">0</td><td class="p-2">1</td><td class="p-2">...</td></tr>
+                                <tr><td class="p-2 border-r dark:border-gray-700 font-bold">B (Cold)</td><td class="p-2">0</td><td class="p-2">1</td><td class="p-2">0</td><td class="p-2">...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <div class="pt-8 border-t border-gray-100 dark:border-gray-800 space-y-4">
+                    <p class="text-[10px] italic text-gray-500 bg-gray-50 dark:bg-gray-800/50 p-4 rounded" id="modalDisclaimer"></p>
+                    <div class="flex justify-between items-end">
+                        <div class="text-[9px] text-gray-400 uppercase font-mono">MIT License | Open-Source Core</div>
+                        <p class="text-xs text-black dark:text-white">Developed by <span class="font-bold">Saurabh Gayali</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DISCLAIMER_TEXT = "The app gives prediction only based on user defined definitions. The predictions are therefore not diagnosis ready and the developer takes no responsibility on the outcome of decisions taken on predictions by the app. The app is just a demo to facilitate hospital which have their own real data for predictions.";
+        document.getElementById('uiDisclaimer').textContent = DISCLAIMER_TEXT;
+        document.getElementById('pdfDisclaimer').textContent = DISCLAIMER_TEXT;
+        document.getElementById('modalDisclaimer').textContent = DISCLAIMER_TEXT;
+
+        let diseaseStats = {}; 
+        let symptomsArray = [];
+        let selectedSymptoms = new Set();
+        let currentResults = [];
+
+        // Theme
+        const toggleDark = document.getElementById('toggleDark');
+        toggleDark.onclick = () => {
+            const isDark = document.documentElement.classList.toggle('dark');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+        };
+        if(localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark');
+
+        document.getElementById('showAbout').onclick = () => document.getElementById('aboutModal').classList.remove('hidden');
+        document.getElementById('closeAbout').onclick = () => document.getElementById('aboutModal').classList.add('hidden');
+
+        // Data Management
+        function processData(data, fields) {
+            const targetCol = fields[0];
+            symptomsArray = fields.slice(1).filter(f => f && String(f).trim());
+            diseaseStats = {};
+
+            data.forEach(row => {
+                const disease = row[targetCol];
+                if (!disease) return;
+                if (!diseaseStats[disease]) diseaseStats[disease] = { _total: 0 };
+                diseaseStats[disease]._total++;
+                
+                symptomsArray.forEach(sym => {
+                    const val = String(row[sym] || "").toLowerCase().trim();
+                    if (val === '1' || val === 'yes' || val === 'true') {
+                        diseaseStats[disease][sym] = (diseaseStats[disease][sym] || 0) + 1;
+                    }
+                });
+            });
+
+            renderSymptoms();
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('mainApp').classList.remove('hidden');
+            document.getElementById('loader').classList.add('hidden');
+        }
+
+        function handleFile(file) {
+            if (!file) return;
+            document.getElementById('loader').classList.remove('hidden');
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (ext === 'csv') {
+                Papa.parse(file, {
+                    header: true, dynamicTyping: true, skipEmptyLines: true,
+                    complete: (results) => processData(results.data, results.meta.fields)
+                });
+            } else {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+                    processData(jsonData, Object.keys(jsonData[0] || {}));
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+        function renderSymptoms() {
+            const list = document.getElementById('symptomList');
+            list.innerHTML = '';
+            symptomsArray.sort().forEach(sym => {
+                const div = document.createElement('div');
+                div.className = 'symptom-card p-2 text-[11px] font-bold border border-gray-200 dark:border-gray-800 rounded cursor-pointer truncate';
+                div.textContent = sym;
+                div.onclick = () => {
+                    if (selectedSymptoms.has(sym)) {
+                        selectedSymptoms.delete(sym);
+                        div.classList.remove('selected');
+                    } else {
+                        selectedSymptoms.add(sym);
+                        div.classList.add('selected');
+                    }
+                    updateBtn();
+                };
+                div.dataset.search = sym.toLowerCase();
+                list.appendChild(div);
+            });
+        }
+
+        function updateBtn() {
+            const count = selectedSymptoms.size;
+            const btn = document.getElementById('predictBtn');
+            btn.disabled = count === 0;
+            btn.classList.toggle('opacity-50', count === 0);
+            document.getElementById('selectedCount').textContent = `${count} items selected`;
+        }
+
+        document.getElementById('dataFile').onchange = (e) => handleFile(e.target.files[0]);
+        
+        document.getElementById('urlBtn').onclick = () => {
+            const url = document.getElementById('urlInput').value.trim();
+            if (!url) return;
+            document.getElementById('loader').classList.remove('hidden');
+            fetch(url).then(r => r.blob()).then(blob => {
+                blob.name = url.split('/').pop() || "data.csv";
+                handleFile(blob);
+            }).catch(() => {
+                alert("CORS error or invalid URL. Please browse the file locally.");
+                document.getElementById('loader').classList.add('hidden');
+            });
+        };
+
+        document.getElementById('clearSelection').onclick = () => {
+            selectedSymptoms.clear();
+            document.querySelectorAll('.symptom-card').forEach(c => c.classList.remove('selected'));
+            updateBtn();
+            document.getElementById('results').classList.add('hidden');
+        };
+
+        document.getElementById('symptomSearch').oninput = (e) => {
+            const term = e.target.value.toLowerCase();
+            document.querySelectorAll('.symptom-card').forEach(c => {
+                c.classList.toggle('hidden', !c.dataset.search.includes(term));
+            });
+        };
+
+        document.getElementById('predictBtn').onclick = () => {
+            const res = [];
+            for (let d in diseaseStats) {
+                let score = 0, matches = 0;
+                selectedSymptoms.forEach(s => {
+                    if (diseaseStats[d][s]) {
+                        score += (diseaseStats[d][s] / diseaseStats[d]._total);
+                        matches++;
+                    }
+                });
+                if (matches > 0) res.push({ name: d, score, matches });
+            }
+            res.sort((a, b) => b.score - a.score);
+            currentResults = res.slice(0, 10);
+            renderResults();
+        };
+
+        function renderResults() {
+            const list = document.getElementById('resultList');
+            document.getElementById('results').classList.remove('hidden');
+            list.innerHTML = '';
+            currentResults.forEach(r => {
+                const conf = Math.min(Math.round((r.score / selectedSymptoms.size) * 100), 100);
+                const div = document.createElement('div');
+                div.className = 'p-4 border border-gray-100 dark:border-gray-800 rounded flex justify-between items-center';
+                div.innerHTML = `<div><h4 class="font-bold">${r.name}</h4><p class="text-[10px] text-gray-400">Strength: ${r.matches} indicators match</p></div><div class="text-xl font-black">${conf}%</div>`;
+                list.appendChild(div);
+            });
+            document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // PDF Generation
+        document.getElementById('downloadPDF').onclick = async () => {
+            const btn = document.getElementById('downloadPDF');
+            btn.textContent = "Processing...";
+            btn.disabled = true;
+
+            const capture = document.getElementById('pdfCapture');
+            document.getElementById('pdfPatient').textContent = document.getElementById('patientName').value || "Unnamed Analysis";
+            document.getElementById('pdfDate').textContent = new Date().toLocaleString();
+            document.getElementById('pdfSyms').textContent = Array.from(selectedSymptoms).join(", ");
+            
+            let tableHTML = `<table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                <tr style="background: #333; color: #fff;">
+                    <th style="padding: 10px; border: 1px solid #444; text-align: left;">Predicted Condition</th>
+                    <th style="padding: 10px; border: 1px solid #444; text-align: center;">Probability Match</th>
+                </tr>`;
+            
+            currentResults.forEach(r => {
+                const conf = Math.min(Math.round((r.score / selectedSymptoms.size) * 100), 100);
+                tableHTML += `<tr>
+                    <td style="padding: 10px; border: 1px solid #eee;">${r.name}</td>
+                    <td style="padding: 10px; border: 1px solid #eee; text-align: center; font-weight: bold;">${conf}%</td>
+                </tr>`;
+            });
+            tableHTML += `</table>`;
+            document.getElementById('pdfTableWrapper').innerHTML = tableHTML;
+
+            try {
+                const canvas = await html2canvas(capture, { 
+                    scale: 3, 
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: "#ffffff"
+                });
+                const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                pdf.save(`Health_Report_${Date.now()}.pdf`);
+            } catch (err) {
+                console.error(err);
+                alert("PDF Generation Failed. Try on a desktop browser.");
+            } finally {
+                btn.textContent = "Download Results PDF";
+                btn.disabled = false;
+            }
+        };
+
+        document.getElementById('downloadChecklist').onclick = async () => {
+            // Paginated HTML-to-canvas-to-jsPDF checklist PDF generation (more compact)
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const margin = 15;
+            const rowsPerPage = 38;
+            const fontSize = 10;
+            const colCount = 11;
+            const colTitles = ['Indicator Name'].concat(Array.from({length: 10}, (_, i) => `P${i+1}`));
+            const colWidths = [180].concat(Array(10).fill(22));
+            const symptoms = symptomsArray.sort();
+            let page = 0;
+            for (let i = 0; i < symptoms.length; i += rowsPerPage) {
+                const rows = symptoms.slice(i, i + rowsPerPage);
+                // Create hidden HTML container
+                const checklistDiv = document.createElement('div');
+                checklistDiv.style.position = 'absolute';
+                checklistDiv.style.left = '-9999px';
+                checklistDiv.style.top = '0';
+                checklistDiv.style.width = '210mm';
+                checklistDiv.style.height = '297mm';
+                checklistDiv.style.background = '#fff';
+                checklistDiv.style.color = '#000';
+                checklistDiv.style.fontFamily = 'sans-serif';
+                checklistDiv.style.padding = `${margin}mm`;
+                checklistDiv.innerHTML = `
+                    <h1 style="font-size: 16pt; font-weight: bold; margin-bottom: 8px;">Patient Symptom Checklist</h1>
+                    <table style="width: 100%; border-collapse: collapse; font-size: ${fontSize}pt;">
+                        <thead>
+                            <tr style="background: #333; color: #fff;">
+                                ${colTitles.map((t, idx) => `<th style="padding: 3px; border: 1px solid #444; text-align: ${idx === 0 ? 'left' : 'center'};">${t}</th>`).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.map(sym => `
+                                <tr>
+                                    <td style="padding: 3px; border: 1px solid #ccc; word-break: break-word; line-height: 1.1;">${sym}</td>
+                                    ${Array(10).fill('').map(() => `<td style="padding: 3px; border: 1px solid #ccc; text-align: center;"></td>`).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    <div style="margin-top: 8px; font-size: 7pt; color: #888; text-align: right;">© 2024 MIT License | Developed by Saurabh Gayali</div>
+                `;
+                document.body.appendChild(checklistDiv);
+                try {
+                    const canvas = await html2canvas(checklistDiv, {
+                        scale: 2,
+                        useCORS: true,
+                        logging: false,
+                        backgroundColor: "#ffffff"
+                    });
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (page > 0) pdf.addPage();
+                    pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+                    page++;
+                } catch (err) {
+                    console.error(err);
+                    alert("Checklist PDF Generation Failed. Try on a desktop browser.");
+                } finally {
+                    document.body.removeChild(checklistDiv);
+                }
+            }
+            pdf.save('checklist.pdf');
+        };
+
+        document.getElementById('resetAppBtn').onclick = () => location.reload();
+    </script>
+</body>
+</html>
